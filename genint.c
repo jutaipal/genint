@@ -1,4 +1,4 @@
-/*  version 0.8                                                                                                                       */
+/*  version 0.9                                                                                                                      */
 /*  Modified genint-PWM: Can generate sequences OR count matches from input file                                                      */
 /*  usage: ./genint-PWM [background PWM] [signal PWM or file with list of PWMs] [number of sequences] [p-value for matches as -log10] [-file input_sequences.txt] */
 /*  NEW: Add -file option to count matches in existing sequences instead of generating new ones                                        */
