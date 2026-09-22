@@ -532,6 +532,41 @@ int main (int argc, char *argv[]) {
         }
     }
     
+    // NEW: Check for -nofilter flag (same stripping as -nomutate)
+    // With -keepfeatures: re-sample non-feature bases once, without rescanning for new matches
+    int no_filter = 0;
+    for(int i = 1; i < argc; i++) {
+        if(strcmp(argv[i], "-nofilter") == 0) {
+            no_filter = 1;
+            for(int j = i; j < argc-1; j++) {
+                argv[j] = argv[j+1];
+            }
+            argc--;
+            break;
+        }
+    }
+    
+    // NEW: Check for -protect_flanks=N flag (same stripping as -nomutate)
+    // With -keepfeatures: also protect N bases on each side of every matched window
+    int protect_flanks = 0;
+    for(int i = 1; i < argc; i++) {
+        if(strncmp(argv[i], "-protect_flanks=", 16) == 0) {
+            char *value = argv[i] + 16;
+            char *end;
+            long n = strtol(value, &end, 10);
+            if(*value == '\0' || *end != '\0' || n < 0) {
+                fprintf(stderr, "Error: -protect_flanks=N requires a non-negative integer, got '%s'\n", value);
+                exit(1);
+            }
+            protect_flanks = (int) n;
+            for(int j = i; j < argc-1; j++) {
+                argv[j] = argv[j+1];
+            }
+            argc--;
+            break;
+        }
+    }
+    
     // NEW: -keepfeatures only works on input sequences
     if(keep_features && !use_input_file) {
         fprintf(stderr, "Error: -keepfeatures requires -file <sequences.txt>\n");
@@ -546,6 +581,8 @@ int main (int argc, char *argv[]) {
         fprintf(stderr, "  -file <sequences.txt> : Count matches in existing sequences instead of generating\n");
         fprintf(stderr, "  -keepfeatures         : With -file: keep matched windows, re-sample all other bases from background PWM\n");
         fprintf(stderr, "                          until no new match is found, and print the resulting sequences\n");
+        fprintf(stderr, "  -nofilter             : With -keepfeatures: re-sample once, do not rescan for new matches (ignored otherwise)\n");
+        fprintf(stderr, "  -protect_flanks=N     : With -keepfeatures: also keep N bases on each side of each matched window (ignored otherwise)\n");
         fprintf(stderr, "  -threshold            : Use fixed threshold scale/(1+scale) instead of random threshold (both modes)\n");
         fprintf(stderr, "  <background PWM>      : PWM file for background nucleotide frequencies\n");
         fprintf(stderr, "  <signal PWM/PWM list> : Single PWM file or text file with list of PWM files and percentages\n");
@@ -568,7 +605,7 @@ int main (int argc, char *argv[]) {
     long int number_of_generated_sequences = atoi(argv[3]);
     long int sequences_to_print = number_of_generated_sequences;
     
-    int minus_log10_pvalue = atoi(argv[4]);
+    double minus_log10_pvalue = atof(argv[4]);
     long double target_pvalue = pow(10, -minus_log10_pvalue);
     
     if(use_input_file) {
@@ -577,6 +614,7 @@ int main (int argc, char *argv[]) {
         printf("\tGENERATE MODE: Generating sequences\n");
     }
     if(keep_features) printf("\tKEEPFEATURES: non-feature bases re-sampled from background PWM\n");
+    if(keep_features) printf("\tProtected flanks: %d bp; rescan filter: %s\n", protect_flanks, no_filter ? "off" : "on");
     printf("\tThreshold: %s\n", use_fixed_threshold ? "fixed, scale/(1+scale)" : "random (Scaled_probability)");
     
     // Load background PWM
@@ -774,7 +812,12 @@ int main (int argc, char *argv[]) {
                                 feature_pos[num_features]    = start;
                                 feature_strand[num_features] = strand;
                                 num_features++;
-                                for(int i = start; i < start + width; i++) keep_mask[i] = 1;   // protect every base of the window
+                                // protect every base of the window, plus protect_flanks bases on each side (clipped to the read)
+                                int protect_first = start - protect_flanks;
+                                int protect_last  = start + width - 1 + protect_flanks;   // inclusive
+                                if(protect_first < 0) protect_first = 0;
+                                if(protect_last > read_length - 1) protect_last = read_length - 1;
+                                for(int i = protect_first; i <= protect_last; i++) keep_mask[i] = 1;
                                 pwm_has_feature = 1;
                             }
                         }
@@ -803,6 +846,7 @@ int main (int argc, char *argv[]) {
                     // Rescan: test every window that contains at least one re-sampled base.
                     // Windows made only of protected bases are unchanged from the input and are not re-tested.
                     new_match_found = 0;
+                    if(no_filter) break;   // NEW (-nofilter): keep the first re-sampling, no rescan
                     for(int p = 0; p < num_signal_pwms && !new_match_found; p++) {
                         int width = qs[p].width;
                         if(read_length < width) continue;
